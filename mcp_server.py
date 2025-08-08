@@ -1,52 +1,83 @@
-# mcp_server.py
-
 import socket
 import threading
+import json
 
 HOST = '0.0.0.0'  # Listen on all interfaces
-PORT = 8080       # MCP server port
+PORT = 8080       # Or whatever port you're using
 
-def handle_client(conn, addr):
-    print(f"[CONNECTED] {addr} connected.")
-    conn.sendall(b"MCP SERVER READY\n")
+def handle_client(client_socket, address):
+    print(f"[CONNECTED] {address} connected.")
 
-    while True:
+    try:
+        data = client_socket.recv(1024).decode()
+
+        # Separate headers and body
+        if "\r\n\r\n" not in data:
+            raise ValueError("Invalid HTTP request format")
+        headers, body = data.split("\r\n\r\n", 1)
+
+        print(f"[HEADERS] {headers}")
+        print(f"[BODY] {body}")
+
+        # Try decoding JSON
         try:
-            data = conn.recv(1024)
-            if not data:
-                break
-
-            command = data.decode().strip().upper()
-            print(f"[COMMAND] {addr} sent: {command}")
-
-            if command == "HELLO":
-                conn.sendall(b"Hello from MCP Server!\n")
-            elif command == "PING":
-                conn.sendall(b"PONG\n")
-            elif command.startswith("DATA"):
-                conn.sendall(b"Data received successfully.\n")
-            elif command == "EXIT":
-                conn.sendall(b"Goodbye.\n")
-                break
+            raw_json = json.loads(body)
+            if isinstance(raw_json, str):
+                request = json.loads(raw_json)
             else:
-                conn.sendall(b"Unknown command.\n")
-        except:
-            break
+                request = raw_json
+            print(f"[REQUEST] {request}")
+        except Exception as e:
+            print(f"[ERROR] Invalid JSON: {e}")
+            client_socket.close()
+            return
 
-    conn.close()
-    print(f"[DISCONNECTED] {addr} disconnected.")
+        # Handle JSON-RPC methods
+        if request.get("method") == "ping":
+            response = {
+                "jsonrpc": "2.0",
+                "result": "pong",
+                "id": request.get("id")
+            }
+        else:
+            response = {
+                "jsonrpc": "2.0",
+                "error": {"code": -32601, "message": "Method not found"},
+                "id": request.get("id")
+            }
+
+        response_data = json.dumps(response)
+        http_response = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(response_data)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            f"{response_data}"
+        )
+
+        client_socket.sendall(http_response.encode())
+
+    except Exception as e:
+        print(f"[ERROR] {e}")
+
+    finally:
+        client_socket.close()
+        print(f"[DISCONNECTED] {address} disconnected.")
 
 def start_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((HOST, PORT))
-    server.listen()
-    print(f"[STARTED] MCP Server listening on {HOST}:{PORT}")
+    server.listen(5)
+    print(f"[STARTED] MCP server listening on {HOST}:{PORT}")
 
     while True:
-        conn, addr = server.accept()
-        thread = threading.Thread(target=handle_client, args=(conn, addr))
-        thread.start()
-        print(f"[ACTIVE CONNECTIONS] {threading.active_count() - 1}")
+        client_socket, addr = server.accept()
+        client_handler = threading.Thread(
+            target=handle_client,
+            args=(client_socket, addr)
+        )
+        client_handler.start()
 
 if __name__ == "__main__":
     start_server()
