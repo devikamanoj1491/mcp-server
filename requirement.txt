@@ -1,0 +1,12 @@
+langchain-groq
+langchain-mcp-adapters
+mcp
+langgraph
+fastmcp
+pydantic
+python-dotenv
+httpx
+markdownify
+readabilipy
+beautifulsoup4
+pillow
